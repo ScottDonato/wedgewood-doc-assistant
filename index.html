@@ -155,9 +155,9 @@ const msalConfig = {
   cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: true }
 };
 
-const msalInstance = new msal.PublicClientApplication(msalConfig);
 let account = null;
 let chatHistory = [];
+const msalInstance = new msal.PublicClientApplication(msalConfig);
 
 async function init() {
   await msalInstance.initialize();
