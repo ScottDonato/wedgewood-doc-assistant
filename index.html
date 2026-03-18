@@ -65,6 +65,7 @@
 <div id="status-bar">Not signed in</div>
 
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script>
 // ── CONFIG ───────────────────────────────────────────────────────────────────
 const CLIENT_ID     = "ebcef407-c2e4-4e72-bd55-c4a364b5c424";
@@ -152,30 +153,24 @@ async function fetchFileContent(token, item, driveId) {
       if (!res.ok) return null;
       return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (["docx","doc"].includes(ext)) {
-      // Download raw file and extract text from XML inside the docx
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
       const arrayBuffer = await res.arrayBuffer();
-      // docx files are zip archives — extract word/document.xml and strip tags
       try {
-        const arr = new Uint8Array(arrayBuffer);
-        // Find word/document.xml inside the zip by locating its content
-        const decoder = new TextDecoder("utf-8");
-        const raw = decoder.decode(arr);
-        // Extract text between XML tags from document.xml portion
-        const xmlStart = raw.indexOf("<w:body");
-        const xmlEnd = raw.indexOf("</w:body>");
-        if (xmlStart !== -1 && xmlEnd !== -1) {
-          const xmlContent = raw.substring(xmlStart, xmlEnd);
-          // Strip all XML tags and get plain text
-          const plainText = xmlContent.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          return { type: "text", content: plainText.substring(0, 8000) };
-        }
-        // Fallback: strip all tags from whatever we got
-        const plainText = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-        return { type: "text", content: plainText.substring(0, 8000) };
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        const xmlFile = zip.file("word/document.xml");
+        if (!xmlFile) return null;
+        const xml = await xmlFile.async("string");
+        // Strip XML tags, collapse whitespace
+        const text = xml
+          .replace(/<w:p[ >]/g, "\n<w:p>")
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        return { type: "text", content: text.substring(0, 8000) };
       } catch(e) {
-        return { type: "text", content: `[Word file: ${item.name} — could not extract content]` };
+        console.error("DOCX parse error:", e);
+        return { type: "text", content: `[Could not read ${item.name}: ${e.message}]` };
       }
     } else if (ext === "pdf") {
       return { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
