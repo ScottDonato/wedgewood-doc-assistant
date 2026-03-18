@@ -152,9 +152,31 @@ async function fetchFileContent(token, item, driveId) {
       if (!res.ok) return null;
       return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (["docx","doc"].includes(ext)) {
-      const res = await fetch(`${base}/content?format=text`, { headers: { Authorization: `Bearer ${token}` } });
+      // Download raw file and extract text from XML inside the docx
+      const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
-      return { type: "text", content: (await res.text()).substring(0, 8000) };
+      const arrayBuffer = await res.arrayBuffer();
+      // docx files are zip archives — extract word/document.xml and strip tags
+      try {
+        const arr = new Uint8Array(arrayBuffer);
+        // Find word/document.xml inside the zip by locating its content
+        const decoder = new TextDecoder("utf-8");
+        const raw = decoder.decode(arr);
+        // Extract text between XML tags from document.xml portion
+        const xmlStart = raw.indexOf("<w:body");
+        const xmlEnd = raw.indexOf("</w:body>");
+        if (xmlStart !== -1 && xmlEnd !== -1) {
+          const xmlContent = raw.substring(xmlStart, xmlEnd);
+          // Strip all XML tags and get plain text
+          const plainText = xmlContent.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+          return { type: "text", content: plainText.substring(0, 8000) };
+        }
+        // Fallback: strip all tags from whatever we got
+        const plainText = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        return { type: "text", content: plainText.substring(0, 8000) };
+      } catch(e) {
+        return { type: "text", content: `[Word file: ${item.name} — could not extract content]` };
+      }
     } else if (ext === "pdf") {
       return { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
     } else if (["png","jpg","jpeg","gif"].includes(ext)) {
