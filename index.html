@@ -154,27 +154,28 @@ async function fetchFileContent(token, item, driveId) {
   try {
     if (["txt","md","csv","json"].includes(ext)) {
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
-      return (await res.text()).substring(0, 8000);
+      return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (["docx","doc"].includes(ext)) {
-      // Use Graph's built-in Word to text conversion
       const res = await fetch(`${base}/content?format=text`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) return null;
-      return (await res.text()).substring(0, 8000);
+      return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (ext === "pdf") {
-      // Download PDF and extract text via Graph preview/text endpoint
-      const res = await fetch(`${base}/preview`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ zoom: 1 })
+      return { type: "text", content: `[PDF file: ${item.name} — file exists at ${item.webUrl}]` };
+    } else if (["png","jpg","jpeg","gif"].includes(ext)) {
+      const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return null;
+      const blob = await res.blob();
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
       });
-      if (!res.ok) {
-        // Fallback: try direct content download and note it's a PDF
-        return `[PDF file: ${item.name} — content extraction not available, but file exists at ${item.webUrl}]`;
-      }
-      const data = await res.json();
-      return data.getUrl ? `[PDF available at: ${data.getUrl}]` : null;
+      const mediaType = ext === "jpg" || ext === "jpeg" ? "image/jpeg"
+        : ext === "gif" ? "image/gif" : "image/png";
+      return { type: "image", mediaType, base64, name: item.name };
     }
   } catch { return null; }
   return null;
@@ -245,7 +246,7 @@ Answer the user's question as helpfully as possible using this information. Alwa
         model: "claude-sonnet-4-20250514",
         max_tokens: 1000,
         system: systemPrompt,
-        messages: chatHistory
+        messages: apiMessages
       })
     });
 
