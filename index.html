@@ -64,13 +64,12 @@
 
 <div id="status-bar">Not signed in</div>
 
-<!-- Load MSAL from Microsoft directly (most reliable source) -->
 <script src="https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js"></script>
 <script>
 // ── CONFIG ───────────────────────────────────────────────────────────────────
 const CLIENT_ID     = "ebcef407-c2e4-4e72-bd55-c4a364b5c424";
 const TENANT_ID     = "02487d34-51cd-4b9a-8af5-59a6981c0cc7";
-const PROXY_URL = "https://wedgewood-proxy.scottd.workers.dev";
+const PROXY_URL     = "https://wedgewood-proxy.scottd.workers.dev";
 const REDIRECT_URI  = "https://scottdonato.github.io/wedgewood-doc-assistant/";
 const SITE_HOSTNAME = "wedgewoodweddings.sharepoint.com";
 const SITE_PATH     = "/sites/Operations";
@@ -91,15 +90,11 @@ async function init() {
       },
       cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: true }
     });
-
     await msalInstance.initialize();
-
     const resp = await msalInstance.handleRedirectPromise();
     if (resp && resp.account) { setAccount(resp.account); return; }
-
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length) setAccount(accounts[0]);
-
     document.getElementById("login-btn").onclick = signIn;
   } catch(e) {
     console.error("MSAL init error:", e);
@@ -120,10 +115,7 @@ function setAccount(acct) {
 async function signIn() {
   if (account) return;
   document.getElementById("loading-overlay").classList.add("visible");
-  await msalInstance.loginRedirect({
-    scopes: ["Sites.Read.All", "Files.Read.All"],
-    redirectUri: REDIRECT_URI
-  });
+  await msalInstance.loginRedirect({ scopes: ["Sites.Read.All", "Files.Read.All"], redirectUri: REDIRECT_URI });
 }
 
 async function getToken() {
@@ -142,7 +134,10 @@ async function fetchSharePointFiles(token) {
   const site = await siteRes.json();
   const driveRes = await fetch(`${base}/sites/${site.id}/drive`, { headers: { Authorization: `Bearer ${token}` } });
   const drive = await driveRes.json();
-  const folderRes = await fetch(`${base}/drives/${drive.id}/root:${FOLDER_PATH}:/children?$select=name,size,lastModifiedDateTime,webUrl,file,folder,id`, { headers: { Authorization: `Bearer ${token}` } });
+  const folderRes = await fetch(
+    `${base}/drives/${drive.id}/root:${FOLDER_PATH}:/children?$select=name,size,lastModifiedDateTime,webUrl,file,folder,id`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
   const folder = await folderRes.json();
   return { files: folder.value || [], driveId: drive.id };
 }
@@ -154,15 +149,14 @@ async function fetchFileContent(token, item, driveId) {
   try {
     if (["txt","md","csv","json"].includes(ext)) {
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return null;
       return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (["docx","doc"].includes(ext)) {
-      const res = await fetch(`${base}/content?format=text`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await fetch(`${base}/content?format=text`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
       return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (ext === "pdf") {
-      return { type: "text", content: `[PDF file: ${item.name} — file exists at ${item.webUrl}]` };
+      return { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
     } else if (["png","jpg","jpeg","gif"].includes(ext)) {
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
@@ -173,11 +167,10 @@ async function fetchFileContent(token, item, driveId) {
         reader.onerror = reject;
         reader.readAsDataURL(blob);
       });
-      const mediaType = ext === "jpg" || ext === "jpeg" ? "image/jpeg"
-        : ext === "gif" ? "image/gif" : "image/png";
+      const mediaType = ["jpg","jpeg"].includes(ext) ? "image/jpeg" : ext === "gif" ? "image/gif" : "image/png";
       return { type: "image", mediaType, base64, name: item.name };
     }
-  } catch { return null; }
+  } catch(e) { console.error("fetchFileContent error:", e); return null; }
   return null;
 }
 
@@ -222,10 +215,17 @@ async function sendMessage() {
       `• ${f.name} (${f.file ? "file" : "folder"}, last modified: ${f.lastModifiedDateTime?.split("T")[0] || "unknown"}) — ${f.webUrl}`
     ).join("\n");
 
+    // Fetch content from all files
     let fileContents = "";
+    const imageBlocks = [];
     for (const item of files.slice(0, 10)) {
-      const content = await fetchFileContent(token, item, driveId);
-      if (content) fileContents += `\n\n--- ${item.name} ---\n${content}`;
+      const result = await fetchFileContent(token, item, driveId);
+      if (!result) continue;
+      if (result.type === "text") {
+        fileContents += `\n\n--- ${item.name} ---\n${result.content}`;
+      } else if (result.type === "image") {
+        imageBlocks.push(result);
+      }
     }
 
     const systemPrompt = `You are a helpful document assistant for Wedgewood Weddings. You have access to the company's SharePoint Operations folder.
@@ -237,11 +237,26 @@ ${fileContents ? `Here is the readable content from some of those files:${fileCo
 
 Answer the user's question as helpfully as possible using this information. Always cite which document the information came from. If you can't find the answer, say so and suggest where they might look. Be friendly and professional.`;
 
+    // Build API messages — attach images to the last user message
+    const apiMessages = chatHistory.map((m, i) => {
+      if (i === chatHistory.length - 1 && m.role === "user" && imageBlocks.length > 0) {
+        return {
+          role: "user",
+          content: [
+            ...imageBlocks.map(img => ({
+              type: "image",
+              source: { type: "base64", media_type: img.mediaType, data: img.base64 }
+            })),
+            { type: "text", text: m.content }
+          ]
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
+
     const response = await fetch(PROXY_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1000,
@@ -251,7 +266,9 @@ Answer the user's question as helpfully as possible using this information. Alwa
     });
 
     const data = await response.json();
-    const reply = data.content?.filter(b => b.type === "text").map(b => b.text).join("\n") || "Sorry, I couldn't get a response. Please try again.";
+    const reply = data.content?.filter(b => b.type === "text").map(b => b.text).join("\n")
+      || "Sorry, I couldn't get a response. Please try again.";
+
     hideTyping();
     addMessage("assistant", reply);
     chatHistory.push({ role: "assistant", content: reply });
@@ -259,6 +276,7 @@ Answer the user's question as helpfully as possible using this information. Alwa
   } catch (err) {
     hideTyping();
     addMessage("assistant", "⚠️ Something went wrong: " + err.message);
+    console.error(err);
   }
 
   document.getElementById("send-btn").disabled = false;
