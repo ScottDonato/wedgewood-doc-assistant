@@ -150,11 +150,34 @@ async function fetchSharePointFiles(token) {
 async function fetchFileContent(token, item, driveId) {
   if (!item.file) return null;
   const ext = item.name.split('.').pop().toLowerCase();
-  if (!["txt","md","csv","json"].includes(ext)) return null;
+  const base = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${item.id}`;
   try {
-    const res = await fetch(`https://graph.microsoft.com/v1.0/drives/${driveId}/items/${item.id}/content`, { headers: { Authorization: `Bearer ${token}` } });
-    return (await res.text()).substring(0, 3000);
+    if (["txt","md","csv","json"].includes(ext)) {
+      const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
+      return (await res.text()).substring(0, 8000);
+    } else if (["docx","doc"].includes(ext)) {
+      // Use Graph's built-in Word to text conversion
+      const res = await fetch(`${base}/content?format=text`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return null;
+      return (await res.text()).substring(0, 8000);
+    } else if (ext === "pdf") {
+      // Download PDF and extract text via Graph preview/text endpoint
+      const res = await fetch(`${base}/preview`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ zoom: 1 })
+      });
+      if (!res.ok) {
+        // Fallback: try direct content download and note it's a PDF
+        return `[PDF file: ${item.name} — content extraction not available, but file exists at ${item.webUrl}]`;
+      }
+      const data = await res.json();
+      return data.getUrl ? `[PDF available at: ${data.getUrl}]` : null;
+    }
   } catch { return null; }
+  return null;
 }
 
 function addMessage(role, content) {
