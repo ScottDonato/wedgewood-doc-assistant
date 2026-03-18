@@ -70,7 +70,7 @@
 // ── CONFIG ───────────────────────────────────────────────────────────────────
 const CLIENT_ID     = "ebcef407-c2e4-4e72-bd55-c4a364b5c424";
 const TENANT_ID     = "02487d34-51cd-4b9a-8af5-59a6981c0cc7";
-const ANTHROPIC_KEY = "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";
+const PROXY_URL = "https://wedgewood-proxy.scottd.workers.dev";
 const REDIRECT_URI  = "https://scottdonato.github.io/wedgewood-doc-assistant/";
 const SITE_HOSTNAME = "wedgewoodweddings.sharepoint.com";
 const SITE_PATH     = "/sites/Operations";
@@ -213,13 +213,10 @@ ${fileContents ? `Here is the readable content from some of those files:${fileCo
 
 Answer the user's question as helpfully as possible using this information. Always cite which document the information came from. If you can't find the answer, say so and suggest where they might look. Be friendly and professional.`;
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch(PROXY_URL, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
