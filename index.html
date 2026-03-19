@@ -231,10 +231,34 @@ async function sendMessage() {
       `• ${f.name} (${f.file ? "file" : "folder"}, last modified: ${f.lastModifiedDateTime?.split("T")[0] || "unknown"}) — ${f.webUrl}`
     ).join("\n");
 
-    // Fetch content from all files
+    // Step 1: Ask Claude which files are most relevant to the question
+    const fileSelectionResponse = await fetch(PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 200,
+        messages: [{
+          role: "user",
+          content: `Here is a list of documents in a company SharePoint folder:\n${files.map(f => f.name).join("\n")}\n\nThe user asked: "${text}"\n\nRespond with ONLY a JSON array of the 1-5 most relevant filenames from the list above that would likely contain the answer. Example: ["file1.docx","file2.pdf"]. If unsure, pick the most likely candidates. Return ONLY the JSON array, nothing else.`
+        }]
+      })
+    });
+    const fileSelectionData = await fileSelectionResponse.json();
+    const fileSelectionText = fileSelectionData.content?.filter(b => b.type === "text").map(b => b.text).join("") || "[]";
+    let relevantNames = [];
+    try {
+      relevantNames = JSON.parse(fileSelectionText.trim());
+    } catch {
+      relevantNames = files.slice(0, 5).map(f => f.name);
+    }
+    console.log("Relevant files selected:", relevantNames);
+
+    // Step 2: Fetch content only from relevant files
+    const relevantFiles = files.filter(f => relevantNames.includes(f.name));
     let fileContents = "";
     const imageBlocks = [];
-    for (const item of files) {
+    for (const item of relevantFiles) {
       const result = await fetchFileContent(token, item, driveId);
       if (!result) continue;
       if (result.type === "text") {
