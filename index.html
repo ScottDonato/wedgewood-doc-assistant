@@ -154,19 +154,23 @@ async function fetchFileContent(token, item, driveId) {
       return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (["docx","doc"].includes(ext)) {
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
+      console.log("DOCX fetch status:", res.status, item.name);
       if (!res.ok) return null;
       const arrayBuffer = await res.arrayBuffer();
+      console.log("DOCX arrayBuffer size:", arrayBuffer.byteLength, item.name);
       try {
         const zip = await JSZip.loadAsync(arrayBuffer);
+        console.log("DOCX zip files:", Object.keys(zip.files));
         const xmlFile = zip.file("word/document.xml");
-        if (!xmlFile) return null;
+        if (!xmlFile) { console.log("No word/document.xml found!"); return null; }
         const xml = await xmlFile.async("string");
-        // Strip XML tags, collapse whitespace
+        console.log("DOCX xml length:", xml.length);
         const text = xml
           .replace(/<w:p[ >]/g, "\n<w:p>")
           .replace(/<[^>]+>/g, "")
           .replace(/\s+/g, " ")
           .trim();
+        console.log("DOCX extracted text preview:", text.substring(0, 200));
         return { type: "text", content: text.substring(0, 8000) };
       } catch(e) {
         console.error("DOCX parse error:", e);
