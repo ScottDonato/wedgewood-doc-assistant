@@ -236,7 +236,7 @@ async function sendMessage() {
     let fileContents = "";
     const imageBlocks = [];
     console.log("All files in folder:", files.map(f => f.name));
-    for (const item of files.slice(0, 10)) {
+    for (const item of files) {
       console.log("Fetching content for:", item.name);
       const result = await fetchFileContent(token, item, driveId);
       console.log("Result for", item.name, ":", result ? result.type : "null");
