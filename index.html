@@ -172,7 +172,20 @@ async function fetchFileContent(token, item, driveId) {
         return { type: "text", content: `[Could not read ${item.name}: ${e.message}]` };
       }
     } else if (ext === "pdf") {
-      return { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
+      // Try Graph's format=text conversion for PDFs
+      const res = await fetch(`${base}/content?format=text`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        // Fallback: try downloading directly and reading as text
+        const res2 = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res2.ok) return { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
+        const text = await res2.text();
+        // Extract any readable text from the PDF binary
+        const readable = text.replace(/[^\x20-\x7E\n]/g, " ").replace(/\s+/g, " ").trim();
+        return readable.length > 100
+          ? { type: "text", content: readable.substring(0, 8000) }
+          : { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
+      }
+      return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (["png","jpg","jpeg","gif"].includes(ext)) {
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
