@@ -253,7 +253,7 @@ async function sendMessage() {
         max_tokens: 200,
         messages: [{
           role: "user",
-          content: `Here is a list of documents in a company SharePoint folder:\n${files.map(f => f.name).join("\n")}\n\nThe user asked: "${text}"\n\nRespond with ONLY a JSON array of the 1-5 most relevant filenames from the list above that would likely contain the answer. Example: ["file1.docx","file2.pdf"]. If unsure, pick the most likely candidates. Return ONLY the JSON array, nothing else.`
+        content: `Here is a list of documents in a company SharePoint folder:\n${files.map(f => f.name).join("\n")}\n\nThe user asked: "${text}"\n\nYour task: return a JSON array of the 1-5 filenames most likely to contain the answer. You MUST always return at least 1 file. Pick the closest matches based on the filename keywords. Return ONLY a valid JSON array with no explanation, no markdown, no backticks. Example format: ["filename1.pdf","filename2.docx"]`
         }]
       })
     });
@@ -261,9 +261,18 @@ async function sendMessage() {
     const fileSelectionText = fileSelectionData.content?.filter(b => b.type === "text").map(b => b.text).join("") || "[]";
     let relevantNames = [];
     try {
-      relevantNames = JSON.parse(fileSelectionText.trim());
+      const cleaned = fileSelectionText.trim().replace(/```json|```/g, "").trim();
+      relevantNames = JSON.parse(cleaned);
+      if (!Array.isArray(relevantNames) || relevantNames.length === 0) throw new Error("empty");
     } catch {
-      relevantNames = files.slice(0, 5).map(f => f.name);
+      // Fallback: pick files whose names contain keywords from the question
+      const keywords = text.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+      relevantNames = files
+        .filter(f => keywords.some(k => f.name.toLowerCase().includes(k)))
+        .slice(0, 5)
+        .map(f => f.name);
+      // If still nothing, just take first 5
+      if (relevantNames.length === 0) relevantNames = files.slice(0, 5).map(f => f.name);
     }
     console.log("Relevant files selected:", relevantNames);
 
