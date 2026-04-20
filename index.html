@@ -297,7 +297,7 @@ ${fileList}
 
 ${fileContents ? `Here is the readable content from some of those files:${fileContents}` : ""}
 
-Answer the user's question as helpfully as possible using this information. Always cite which document the information came from. If you can't find the answer, say so and suggest where they might look. Be friendly and professional.`;
+Answer the user's question as helpfully as possible using this information. Always cite which document the information came from. Be brief and concise — get straight to the point, no unnecessary filler. If you can't find the answer, say so in one sentence and suggest where they might look.`;
 
     // Build API messages — attach images to the last user message
     const apiMessages = chatHistory.map((m, i) => {
