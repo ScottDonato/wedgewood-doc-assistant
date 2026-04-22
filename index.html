@@ -172,20 +172,30 @@ async function fetchFileContent(token, item, driveId) {
         return { type: "text", content: `[Could not read ${item.name}: ${e.message}]` };
       }
     } else if (ext === "pdf") {
-      // Try Graph's format=text conversion for PDFs
-      const res = await fetch(`${base}/content?format=text`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) {
-        // Fallback: try downloading directly and reading as text
-        const res2 = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res2.ok) return { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
-        const text = await res2.text();
-        // Extract any readable text from the PDF binary
-        const readable = text.replace(/[^\x20-\x7E\n]/g, " ").replace(/\s+/g, " ").trim();
-        return readable.length > 100
-          ? { type: "text", content: readable.substring(0, 8000) }
-          : { type: "text", content: `[PDF file: ${item.name} — available at ${item.webUrl}]` };
+      try {
+        // Get direct download URL for the PDF
+        const metaRes = await fetch(`${base}?$select=@microsoft.graph.downloadUrl`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const meta = await metaRes.json();
+        const downloadUrl = meta["@microsoft.graph.downloadUrl"];
+        if (!downloadUrl) return { type: "text", content: `[PDF: ${item.name} — could not get download URL]` };
+
+        // Send to Cloudflare Worker for extraction
+        const extractRes = await fetch(`${PROXY_URL}/extract-pdf`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileUrl: downloadUrl, token })
+        });
+        const extractData = await extractRes.json();
+        if (extractData.text && extractData.text.length > 50) {
+          return { type: "text", content: extractData.text };
+        }
+        return { type: "text", content: `[PDF: ${item.name} — available at ${item.webUrl}]` };
+      } catch(e) {
+        console.error("PDF extraction error:", e);
+        return { type: "text", content: `[PDF: ${item.name} — available at ${item.webUrl}]` };
       }
-      return { type: "text", content: (await res.text()).substring(0, 8000) };
     } else if (["png","jpg","jpeg","gif"].includes(ext)) {
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
