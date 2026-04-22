@@ -144,7 +144,8 @@ async function fetchSharePointFiles(token) {
 }
 
 async function fetchFileContent(token, item, driveId) {
-  if (!item.file) return null;
+  console.log("fetchFileContent called for:", item.name, "file prop:", JSON.stringify(item.file));
+  if (!item.file) { console.log("Skipping - no file property:", item.name); return null; }
   const ext = item.name.split('.').pop().toLowerCase();
   const base = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${item.id}`;
   try {
