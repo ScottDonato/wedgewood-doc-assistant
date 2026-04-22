@@ -172,6 +172,7 @@ async function fetchFileContent(token, item, driveId) {
         return { type: "text", content: `[Could not read ${item.name}: ${e.message}]` };
       }
     } else if (ext === "pdf") {
+      console.log("Attempting PDF extraction for:", item.name);
       try {
         // Get direct download URL for the PDF
         const metaRes = await fetch(`${base}?$select=@microsoft.graph.downloadUrl`, {
