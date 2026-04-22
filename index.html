@@ -53,7 +53,7 @@
 <div id="messages">
   <div class="msg">
     <div class="avatar"><img src="https://raw.githubusercontent.com/ScottDonato/wedgewood-doc-assistant/main/WedgewoodWeddings-RespectedEventHosts.png" style="width:100%;height:100%;object-fit:cover;" /></div>
-    <div class="bubble assistant">Hi! I'm your Wedgewood Weddings document assistant 💐 Sign in with your company account and then ask me anything — I can answer questions, find documents, or summarize content from the Operations folder.</div>
+    <div class="bubble assistant">Hi! I'm your Wedgewood Weddings document assistant. Sign in with your company account and then ask me anything — I can answer questions, find documents, or summarize content from the Operations folder.</div>
   </div>
 </div>
 
@@ -75,6 +75,7 @@ const REDIRECT_URI  = "https://scottdonato.github.io/wedgewood-doc-assistant/";
 const SITE_HOSTNAME = "wedgewoodweddings.sharepoint.com";
 const SITE_PATH     = "/sites/Operations";
 const FOLDER_PATH   = "/AI Chatbot";
+const LOGO_URL      = "https://raw.githubusercontent.com/ScottDonato/wedgewood-doc-assistant/main/WedgewoodWeddings-RespectedEventHosts.png";
 // ─────────────────────────────────────────────────────────────────────────────
 
 let account = null;
@@ -84,11 +85,7 @@ let msalInstance = null;
 async function init() {
   try {
     msalInstance = new msal.PublicClientApplication({
-      auth: {
-        clientId: CLIENT_ID,
-        authority: `https://login.microsoftonline.com/${TENANT_ID}`,
-        redirectUri: REDIRECT_URI
-      },
+      auth: { clientId: CLIENT_ID, authority: `https://login.microsoftonline.com/${TENANT_ID}`, redirectUri: REDIRECT_URI },
       cache: { cacheLocation: "sessionStorage", storeAuthStateInCookie: true }
     });
     await msalInstance.initialize();
@@ -144,8 +141,8 @@ async function fetchSharePointFiles(token) {
 }
 
 async function fetchFileContent(token, item, driveId) {
-  console.log("fetchFileContent called for:", item.name, "file prop:", JSON.stringify(item.file));
-  if (!item.file) { console.log("Skipping - no file property:", item.name); return null; }
+  console.log("fetchFileContent:", item.name, "hasFile:", !!item.file);
+  if (!item.file) return null;
   const ext = item.name.split('.').pop().toLowerCase();
   const base = `https://graph.microsoft.com/v1.0/drives/${driveId}/items/${item.id}`;
   try {
@@ -162,34 +159,27 @@ async function fetchFileContent(token, item, driveId) {
         const xmlFile = zip.file("word/document.xml");
         if (!xmlFile) return null;
         const xml = await xmlFile.async("string");
-        const text = xml
-          .replace(/<w:p[ >]/g, "\n<w:p>")
-          .replace(/<[^>]+>/g, "")
-          .replace(/\s+/g, " ")
-          .trim();
+        const text = xml.replace(/<w:p[ >]/g, "\n<w:p>").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
         return { type: "text", content: text.substring(0, 8000) };
       } catch(e) {
         console.error("DOCX parse error:", e);
-        return { type: "text", content: `[Could not read ${item.name}: ${e.message}]` };
+        return null;
       }
     } else if (ext === "pdf") {
       console.log("Attempting PDF extraction for:", item.name);
       try {
-        // Get direct download URL for the PDF
-        const metaRes = await fetch(`${base}?$select=@microsoft.graph.downloadUrl`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
+        const metaRes = await fetch(`${base}?$select=@microsoft.graph.downloadUrl`, { headers: { Authorization: `Bearer ${token}` } });
         const meta = await metaRes.json();
         const downloadUrl = meta["@microsoft.graph.downloadUrl"];
+        console.log("PDF download URL obtained:", !!downloadUrl);
         if (!downloadUrl) return { type: "text", content: `[PDF: ${item.name} — could not get download URL]` };
-
-        // Send to Cloudflare Worker for extraction
         const extractRes = await fetch(`${PROXY_URL}/extract-pdf`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileUrl: downloadUrl, token })
         });
         const extractData = await extractRes.json();
+        console.log("PDF extraction result:", extractData.text ? extractData.text.substring(0, 100) : "empty");
         if (extractData.text && extractData.text.length > 50) {
           return { type: "text", content: extractData.text };
         }
@@ -202,14 +192,14 @@ async function fetchFileContent(token, item, driveId) {
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
       const blob = await res.blob();
-      const base64 = await new Promise((resolve, reject) => {
+      const b64 = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result.split(",")[1]);
         reader.onerror = reject;
         reader.readAsDataURL(blob);
       });
       const mediaType = ["jpg","jpeg"].includes(ext) ? "image/jpeg" : ext === "gif" ? "image/gif" : "image/png";
-      return { type: "image", mediaType, base64, name: item.name };
+      return { type: "image", mediaType, base64: b64, name: item.name };
     }
   } catch(e) { console.error("fetchFileContent error:", e); return null; }
   return null;
@@ -219,8 +209,8 @@ function addMessage(role, content) {
   const msgs = document.getElementById("messages");
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
-      wrap.innerHTML = role === "assistant"
-    ? `<div class="avatar"><img src="https://raw.githubusercontent.com/ScottDonato/wedgewood-doc-assistant/main/WedgewoodWeddings-RespectedEventHosts.png" style="width:100%;height:100%;object-fit:cover;" /></div><div class="bubble assistant"></div>`
+  wrap.innerHTML = role === "assistant"
+    ? `<div class="avatar"><img src="${LOGO_URL}" style="width:100%;height:100%;object-fit:cover;" /></div><div class="bubble assistant"></div>`
     : `<div class="bubble user"></div>`;
   wrap.querySelector(".bubble").textContent = content;
   msgs.appendChild(wrap);
@@ -231,7 +221,7 @@ function showTyping() {
   const msgs = document.getElementById("messages");
   const wrap = document.createElement("div");
   wrap.className = "msg"; wrap.id = "typing";
-  wrap.innerHTML = `<div class="avatar"><img src="https://raw.githubusercontent.com/ScottDonato/wedgewood-doc-assistant/main/WedgewoodWeddings-RespectedEventHosts.png" style="width:100%;height:100%;object-fit:cover;" /></div><div class="bubble assistant typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
+  wrap.innerHTML = `<div class="avatar"><img src="${LOGO_URL}" style="width:100%;height:100%;object-fit:cover;" /></div><div class="bubble assistant typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>`;
   msgs.appendChild(wrap);
   msgs.scrollTop = msgs.scrollHeight;
 }
@@ -256,7 +246,7 @@ async function sendMessage() {
       `• ${f.name} (${f.file ? "file" : "folder"}, last modified: ${f.lastModifiedDateTime?.split("T")[0] || "unknown"}) — ${f.webUrl}`
     ).join("\n");
 
-    // Step 1: Ask Claude which files are most relevant to the question
+    // Step 1: Ask Claude which files are most relevant
     const fileSelectionResponse = await fetch(PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -265,30 +255,28 @@ async function sendMessage() {
         max_tokens: 200,
         messages: [{
           role: "user",
-        content: `Here is a list of documents in a company SharePoint folder:\n${files.map(f => f.name).join("\n")}\n\nThe user asked: "${text}"\n\nYour task: return a JSON array of the 1-5 filenames most likely to contain the answer. You MUST always return at least 1 file. Pick the closest matches based on the filename keywords. Return ONLY a valid JSON array with no explanation, no markdown, no backticks. Example format: ["filename1.pdf","filename2.docx"]`
+          content: `Here is a list of documents in a company SharePoint folder:\n${files.map(f => f.name).join("\n")}\n\nThe user asked: "${text}"\n\nYour task: return a JSON array of the 1-5 filenames most likely to contain the answer. You MUST always return at least 1 file. Pick the closest matches based on the filename keywords. Return ONLY a valid JSON array with no explanation, no markdown, no backticks. Example format: ["filename1.pdf","filename2.docx"]`
         }]
       })
     });
     const fileSelectionData = await fileSelectionResponse.json();
     const fileSelectionText = fileSelectionData.content?.filter(b => b.type === "text").map(b => b.text).join("") || "[]";
+
     let relevantNames = [];
     try {
       const cleaned = fileSelectionText.trim().replace(/```json|```/g, "").trim();
       relevantNames = JSON.parse(cleaned);
       if (!Array.isArray(relevantNames) || relevantNames.length === 0) throw new Error("empty");
     } catch {
-      // Fallback: pick files whose names contain keywords from the question
       const keywords = text.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-      relevantNames = files
-        .filter(f => keywords.some(k => f.name.toLowerCase().includes(k)))
-        .slice(0, 5)
-        .map(f => f.name);
-      // If still nothing, just take first 5
+      relevantNames = files.filter(f => keywords.some(k => f.name.toLowerCase().includes(k))).slice(0, 5).map(f => f.name);
       if (relevantNames.length === 0) relevantNames = files.slice(0, 5).map(f => f.name);
     }
-    console.log("Relevant files selected:", relevantNames);
 
-    // Step 2: Fetch content only from relevant files
+    console.log("Relevant files selected:", relevantNames);
+    console.log("All file names in folder:", files.map(f => f.name));
+
+    // Step 2: Match and fetch content from relevant files
     const relevantFiles = files.filter(f =>
       relevantNames.some(name =>
         f.name === name ||
@@ -297,16 +285,17 @@ async function sendMessage() {
         f.name.replace(/^\d{8}\s*-\s*/, "") === name.replace(/^\d{8}\s*-\s*/, "")
       )
     );
+    console.log("Matched files:", relevantFiles.map(f => f.name));
+
     let fileContents = "";
     const imageBlocks = [];
     for (const item of relevantFiles) {
+      console.log("Fetching content for:", item.name);
       const result = await fetchFileContent(token, item, driveId);
+      console.log("Result for", item.name, ":", result ? result.type : "null");
       if (!result) continue;
-      if (result.type === "text") {
-        fileContents += `\n\n--- ${item.name} ---\n${result.content}`;
-      } else if (result.type === "image") {
-        imageBlocks.push(result);
-      }
+      if (result.type === "text") fileContents += `\n\n--- ${item.name} ---\n${result.content}`;
+      else if (result.type === "image") imageBlocks.push(result);
     }
 
     const systemPrompt = `You are a helpful document assistant for Wedgewood Weddings. You have access to the company's SharePoint Operations folder.
@@ -318,16 +307,12 @@ ${fileContents ? `Here is the readable content from some of those files:${fileCo
 
 Answer the user's question as helpfully as possible using this information. Always cite which document the information came from. Be brief and concise — get straight to the point, no unnecessary filler. If you can't find the answer, say so in one sentence and suggest where they might look.`;
 
-    // Build API messages — attach images to the last user message
     const apiMessages = chatHistory.map((m, i) => {
       if (i === chatHistory.length - 1 && m.role === "user" && imageBlocks.length > 0) {
         return {
           role: "user",
           content: [
-            ...imageBlocks.map(img => ({
-              type: "image",
-              source: { type: "base64", media_type: img.mediaType, data: img.base64 }
-            })),
+            ...imageBlocks.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } })),
             { type: "text", text: m.content }
           ]
         };
@@ -338,18 +323,11 @@ Answer the user's question as helpfully as possible using this information. Alwa
     const response = await fetch(PROXY_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: apiMessages
-      })
+      body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: systemPrompt, messages: apiMessages })
     });
 
     const data = await response.json();
-    const reply = data.content?.filter(b => b.type === "text").map(b => b.text).join("\n")
-      || "Sorry, I couldn't get a response. Please try again.";
-
+    const reply = data.content?.filter(b => b.type === "text").map(b => b.text).join("\n") || "Sorry, I couldn't get a response. Please try again.";
     hideTyping();
     addMessage("assistant", reply);
     chatHistory.push({ role: "assistant", content: reply });
