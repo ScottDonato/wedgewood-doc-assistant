@@ -173,17 +173,18 @@ async function fetchFileContent(token, item, driveId) {
         const downloadUrl = meta["@microsoft.graph.downloadUrl"];
         console.log("PDF download URL obtained:", !!downloadUrl);
         if (!downloadUrl) return { type: "text", content: `[PDF: ${item.name} — could not get download URL]` };
-        const extractRes = await fetch(`${PROXY_URL}/extract-pdf`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ fileUrl: downloadUrl, token })
+        // Download PDF and convert to base64 for Claude to read natively
+        const pdfRes = await fetch(downloadUrl);
+        if (!pdfRes.ok) return null;
+        const blob = await pdfRes.blob();
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result.split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
         });
-        const extractData = await extractRes.json();
-        console.log("PDF extraction result:", extractData.text ? extractData.text.substring(0, 100) : "empty");
-        if (extractData.text && extractData.text.length > 50) {
-          return { type: "text", content: extractData.text };
-        }
-        return { type: "text", content: `[PDF: ${item.name} — available at ${item.webUrl}]` };
+        console.log("PDF base64 obtained, length:", base64.length);
+        return { type: "pdf", base64, name: item.name };
       } catch(e) {
         console.error("PDF extraction error:", e);
         return { type: "text", content: `[PDF: ${item.name} — available at ${item.webUrl}]` };
@@ -289,6 +290,7 @@ async function sendMessage() {
 
     let fileContents = "";
     const imageBlocks = [];
+    const pdfBlocks = [];
     for (const item of relevantFiles) {
       console.log("Fetching content for:", item.name);
       const result = await fetchFileContent(token, item, driveId);
@@ -296,6 +298,7 @@ async function sendMessage() {
       if (!result) continue;
       if (result.type === "text") fileContents += `\n\n--- ${item.name} ---\n${result.content}`;
       else if (result.type === "image") imageBlocks.push(result);
+      else if (result.type === "pdf") pdfBlocks.push(result);
     }
 
     const systemPrompt = `You are a helpful document assistant for Wedgewood Weddings. You have access to the company's SharePoint Operations folder.
@@ -308,11 +311,18 @@ ${fileContents ? `Here is the readable content from some of those files:${fileCo
 Answer the user's question as helpfully as possible using this information. Always cite which document the information came from. Be brief and concise — get straight to the point, no unnecessary filler. If you can't find the answer, say so in one sentence and suggest where they might look.`;
 
     const apiMessages = chatHistory.map((m, i) => {
-      if (i === chatHistory.length - 1 && m.role === "user" && imageBlocks.length > 0) {
+      if (i === chatHistory.length - 1 && m.role === "user" && (imageBlocks.length > 0 || pdfBlocks.length > 0)) {
         return {
           role: "user",
           content: [
-            ...imageBlocks.map(img => ({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } })),
+            ...pdfBlocks.map(pdf => ({
+              type: "document",
+              source: { type: "base64", media_type: "application/pdf", data: pdf.base64 }
+            })),
+            ...imageBlocks.map(img => ({
+              type: "image",
+              source: { type: "base64", media_type: img.mediaType, data: img.base64 }
+            })),
             { type: "text", text: m.content }
           ]
         };
