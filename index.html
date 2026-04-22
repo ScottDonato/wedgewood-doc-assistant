@@ -166,14 +166,11 @@ async function fetchFileContent(token, item, driveId) {
         return null;
       }
     } else if (ext === "pdf") {
-      console.log("Attempting PDF extraction for:", item.name);
       try {
         const metaRes = await fetch(`${base}?$select=@microsoft.graph.downloadUrl`, { headers: { Authorization: `Bearer ${token}` } });
         const meta = await metaRes.json();
         const downloadUrl = meta["@microsoft.graph.downloadUrl"];
-        console.log("PDF download URL obtained:", !!downloadUrl);
         if (!downloadUrl) return { type: "text", content: `[PDF: ${item.name} — could not get download URL]` };
-        // Download PDF and convert to base64 for Claude to read natively
         const pdfRes = await fetch(downloadUrl);
         if (!pdfRes.ok) return null;
         const blob = await pdfRes.blob();
@@ -183,13 +180,42 @@ async function fetchFileContent(token, item, driveId) {
           reader.onerror = reject;
           reader.readAsDataURL(blob);
         });
-        console.log("PDF base64 obtained, length:", base64.length);
         return { type: "pdf", base64, name: item.name };
       } catch(e) {
-        console.error("PDF extraction error:", e);
+        console.error("PDF error:", e);
         return { type: "text", content: `[PDF: ${item.name} — available at ${item.webUrl}]` };
       }
-    } else if (["png","jpg","jpeg","gif"].includes(ext)) {
+    } else if (["xlsx","xls"].includes(ext)) {
+      const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) return null;
+      const arrayBuffer = await res.arrayBuffer();
+      try {
+        const zip = await JSZip.loadAsync(arrayBuffer);
+        // Extract shared strings (the actual cell text values)
+        const sharedStringsFile = zip.file("xl/sharedStrings.xml");
+        const sharedStrings = [];
+        if (sharedStringsFile) {
+          const xml = await sharedStringsFile.async("string");
+          const matches = xml.match(/<t[^>]*>([^<]*)<\/t>/g) || [];
+          for (const m of matches) {
+            sharedStrings.push(m.replace(/<[^>]+>/g, "").trim());
+          }
+        }
+        // Extract sheet data
+        let text = sharedStrings.filter(s => s.length > 0).join(" | ");
+        // Also try to get sheet names
+        const workbookFile = zip.file("xl/workbook.xml");
+        if (workbookFile) {
+          const xml = await workbookFile.async("string");
+          const sheetNames = xml.match(/name="([^"]+)"/g) || [];
+          const names = sheetNames.map(s => s.replace(/name="|"/g, "")).join(", ");
+          if (names) text = `Sheets: ${names}\n\n${text}`;
+        }
+        return { type: "text", content: text.substring(0, 8000) };
+      } catch(e) {
+        console.error("XLSX parse error:", e);
+        return null;
+      }
       const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return null;
       const blob = await res.blob();
@@ -275,9 +301,7 @@ async function sendMessage() {
     }
 
     console.log("Relevant files selected:", relevantNames);
-    console.log("All file names in folder:", files.map(f => f.name));
 
-    // Step 2: Match and fetch content from relevant files
     const relevantFiles = files.filter(f =>
       relevantNames.some(name =>
         f.name === name ||
@@ -286,15 +310,12 @@ async function sendMessage() {
         f.name.replace(/^\d{8}\s*-\s*/, "") === name.replace(/^\d{8}\s*-\s*/, "")
       )
     );
-    console.log("Matched files:", relevantFiles.map(f => f.name));
 
     let fileContents = "";
     const imageBlocks = [];
     const pdfBlocks = [];
     for (const item of relevantFiles) {
-      console.log("Fetching content for:", item.name);
       const result = await fetchFileContent(token, item, driveId);
-      console.log("Result for", item.name, ":", result ? result.type : "null");
       if (!result) continue;
       if (result.type === "text") fileContents += `\n\n--- ${item.name} ---\n${result.content}`;
       else if (result.type === "image") imageBlocks.push(result);
