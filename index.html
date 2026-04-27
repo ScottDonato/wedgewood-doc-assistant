@@ -186,9 +186,9 @@ async function fetchFileContent(token, item, driveId) {
         return { type: "text", content: `[PDF: ${item.name} — available at ${item.webUrl}]` };
       }
     } else if (["xlsx","xls"].includes(ext)) {
-      const res = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) return null;
-      const arrayBuffer = await res.arrayBuffer();
+      const xlsxRes = await fetch(`${base}/content`, { headers: { Authorization: `Bearer ${token}` } });
+      if (!xlsxRes.ok) return null;
+      const arrayBuffer = await xlsxRes.arrayBuffer();
       try {
         const zip = await JSZip.loadAsync(arrayBuffer);
         // Extract shared strings (the actual cell text values)
