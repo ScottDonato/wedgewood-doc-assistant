@@ -223,14 +223,45 @@ function avatarHtml() {
   return `<div class="avatar"><img src="${LOGO_URL}" style="width:100%;height:100%;object-fit:cover;" /></div>`;
 }
 
-function addMessage(role, content) {
+function addMessage(role, content, files) {
   const msgs = document.getElementById("messages");
   const wrap = document.createElement("div");
   wrap.className = `msg ${role}`;
-  wrap.innerHTML = role === "assistant"
-    ? `${avatarHtml()}<div class="bubble assistant"></div>`
-    : `<div class="bubble user"></div>`;
-  wrap.querySelector(".bubble").textContent = content;
+
+  // Check for download trigger in assistant messages
+  if (role === "assistant" && content.includes("DOWNLOAD:")) {
+    const parts = content.split(/(DOWNLOAD:[^\s]+)/g);
+    const bubble = document.createElement("div");
+    bubble.className = "bubble assistant";
+    for (const part of parts) {
+      if (part.startsWith("DOWNLOAD:")) {
+        const filename = part.replace("DOWNLOAD:", "").trim();
+        const file = files && files.find(f =>
+          f.name === filename ||
+          f.name.replace(/^\d{8}\s*-\s*/, "") === filename.replace(/^\d{8}\s*-\s*/, "") ||
+          f.name.includes(filename) || filename.includes(f.name)
+        );
+        const btn = document.createElement("a");
+        btn.textContent = `⬇ Download ${filename}`;
+        btn.href = file ? file.webUrl : "#";
+        btn.target = "_blank";
+        btn.style.cssText = "display:inline-block;background:#7c5c3e;color:#fff;padding:6px 12px;border-radius:12px;text-decoration:none;font-size:13px;margin:4px 0;";
+        bubble.appendChild(btn);
+      } else if (part.trim()) {
+        const span = document.createElement("span");
+        span.textContent = part;
+        bubble.appendChild(span);
+      }
+    }
+    wrap.innerHTML = avatarHtml();
+    wrap.appendChild(bubble);
+  } else {
+    wrap.innerHTML = role === "assistant"
+      ? `${avatarHtml()}<div class="bubble assistant"></div>`
+      : `<div class="bubble user"></div>`;
+    wrap.querySelector(".bubble").textContent = content;
+  }
+
   msgs.appendChild(wrap);
   msgs.scrollTop = msgs.scrollHeight;
 }
@@ -317,7 +348,7 @@ ${fileList}
 
 ${fileContents ? `Readable content:${fileContents}` : ""}
 
-Be brief and concise. Cite which document information came from. If you can't find the answer, say so in one sentence.`;
+Be brief and concise. Cite which document information came from. If the user asks to download, pull, or get a copy of a document, respond with the exact filename in this format: DOWNLOAD:filename.ext — this will trigger a download button. If you can't find the answer, say so in one sentence.`;
 
     const apiMessages = chatHistory.map((m, i) => {
       if (i === chatHistory.length - 1 && m.role === "user" && (imageBlocks.length > 0 || pdfBlocks.length > 0)) {
@@ -341,7 +372,7 @@ Be brief and concise. Cite which document information came from. If you can't fi
     const data = await answerRes.json();
     const reply = data.content?.filter(b => b.type === "text").map(b => b.text).join("\n") || "Sorry, I couldn't get a response. Please try again.";
     hideTyping();
-    addMessage("assistant", reply);
+    addMessage("assistant", reply, files);
     chatHistory.push({ role: "assistant", content: reply });
 
   } catch(err) {
