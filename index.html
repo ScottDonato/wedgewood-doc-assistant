@@ -348,7 +348,7 @@ ${fileList}
 
 ${fileContents ? `Readable content:${fileContents}` : ""}
 
-Be brief and concise. Cite which document information came from. If the user asks to download, pull, or get a copy of a document, respond with the exact filename in this format: DOWNLOAD:filename.ext — this will trigger a download button. If you can't find the answer, say so in one sentence.`;
+Be brief and concise. Always cite which document information came from. If the user asks to download, pull, get, or access a copy of a document, you MUST respond with DOWNLOAD: followed immediately by the exact filename from the folder list, like this: DOWNLOAD:filename.pdf — do not add any other text around it, just include it in your response. If you can't find the answer, say so in one sentence.`;
 
     const apiMessages = chatHistory.map((m, i) => {
       if (i === chatHistory.length - 1 && m.role === "user" && (imageBlocks.length > 0 || pdfBlocks.length > 0)) {
